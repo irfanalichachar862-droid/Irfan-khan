@@ -1,0 +1,8 @@
+{
+  "name": "ScanWake",
+  "description": "Anti-cheat wake-up alarm application for Android enforcing morning wakefulness through physical QR/barcode scanning, sequential alarm chains, and lockout guards.",
+  "requestFramePermissions": [
+    "camera"
+  ],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

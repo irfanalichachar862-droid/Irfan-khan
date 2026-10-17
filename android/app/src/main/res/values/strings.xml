@@ -1,0 +1,10 @@
+<resources>
+    <string name="app_name">ScanWake</string>
+    <string name="notification_channel_alarm_name">ScanWake Alarm Ringing</string>
+    <string name="notification_channel_alarm_desc">High-priority notification for active anti-cheat alarms</string>
+    <string name="alarm_ringing_title">ScanWake Ringing</string>
+    <string name="alarm_ringing_desc">Scan designated QR code to dismiss!</string>
+    <string name="lockout_warning">ANTI-CHEAT LOCKOUT ACTIVE</string>
+    <string name="lockout_subtitle">Scan the required barcode to silence and unlock</string>
+    <string name="volume_guard_warning">Volume reduction blocked! Anti-cheat lock engaged.</string>
+</resources>

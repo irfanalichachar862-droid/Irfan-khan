@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- ScanWake Official Palette -->
+    <color name="primary_neon_cyan">#4ADEDE</color>
+    <color name="secondary_teal">#64CCC5</color>
+    <color name="secondary_mint">#7DE2D1</color>
+    <color name="bg_charcoal">#0B0E11</color>
+    <color name="surface_slate">#1C232B</color>
+    <color name="text_white">#FFFFFF</color>
+    <color name="text_muted">#8C9BA8</color>
+    <color name="error_alert">#FF5C5C</color>
+</resources>
