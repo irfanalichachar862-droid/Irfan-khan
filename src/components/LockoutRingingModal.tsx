@@ -2,21 +2,22 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Camera,
-  CheckCircle2,
+  Check,
+  KeyRound,
   Lock,
-  Maximize2,
-  Minimize2,
-  QrCode,
   ShieldAlert,
   Volume2,
-  VolumeX,
-  X,
   Zap,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import jsQR from 'jsqr';
-import { AlarmItem, RegisteredTag, advanceChainStep, verifyBarcodeMatch } from '../utils/antiCheatRules';
-import { playAlarmSound, stopAlarmSound, playTestBeep, setMasterVolume } from '../utils/audioSynthesizer';
+import { AlarmItem, RegisteredTag, verifyBarcodeMatch } from '../utils/antiCheatRules';
+import {
+  playAlarmSound,
+  stopAlarmSound,
+  playTestBeep,
+  setMasterVolume,
+} from '../utils/audioSynthesizer';
 
 interface LockoutRingingModalProps {
   alarm: AlarmItem;
@@ -36,24 +37,26 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
   chainInfo,
   onDismiss,
 }) => {
-  const [isCameraActive, setIsCameraActive] = useState<boolean>(true);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [scanStatus, setScanStatus] = useState<string | null>(null);
   const [scanStatusType, setScanStatusType] = useState<'error' | 'success' | 'info'>('info');
   const [volume, setVolume] = useState<number>(1.0);
   const [showVolumeAlert, setShowVolumeAlert] = useState<boolean>(false);
   const [showExitAlert, setShowExitAlert] = useState<boolean>(false);
-  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
-  const [attemptCount, setAttemptCount] = useState<number>(0);
+  const [manualCodeInput, setManualCodeInput] = useState<string>('');
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const animFrameRef = useRef<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const photoInputRef = useRef<HTMLInputElement | null>(null);
 
   // Start alarm audio on mount
   useEffect(() => {
-    playAlarmSound(alarm.toneId as any || 'loud_siren', 1.0);
+    playAlarmSound((alarm.toneId as any) || 'loud_siren', 1.0, {
+      customDataUrl: alarm.customToneDataUrl,
+      customFreq: alarm.customToneFreq,
+    });
     return () => {
       stopAlarmSound();
       if (streamRef.current) {
@@ -63,7 +66,7 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
         cancelAnimationFrame(animFrameRef.current);
       }
     };
-  }, [alarm.toneId]);
+  }, [alarm.toneId, alarm.customToneDataUrl, alarm.customToneFreq]);
 
   // Initialize camera scanner
   useEffect(() => {
@@ -87,7 +90,9 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
         }
       } catch (err: any) {
         console.warn('Camera access error:', err);
-        setCameraError('Camera unavailable or permission denied. You can use the Quick Scan simulator below.');
+        setCameraError(
+          'Live camera feed blocked. Capture QR photo with your phone camera or enter your physical tag code below.'
+        );
       }
     }
 
@@ -103,7 +108,10 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
 
   const startScanningLoop = () => {
     const scanFrame = () => {
-      if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+      if (
+        videoRef.current &&
+        videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
+      ) {
         const canvas = canvasRef.current;
         if (canvas) {
           const video = videoRef.current;
@@ -119,7 +127,7 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
 
             if (code && code.data) {
               handleBarcodeScanned(code.data);
-              return; // Stop scan loop on detected code
+              return;
             }
           }
         }
@@ -130,9 +138,35 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
     animFrameRef.current = requestAnimationFrame(scanFrame);
   };
 
+  const handlePhotoCaptureScan = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.drawImage(img, 0, 0);
+        const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const code = jsQR(imgData.data, imgData.width, imgData.height);
+        if (code && code.data) {
+          handleBarcodeScanned(code.data);
+        } else {
+          setScanStatus('No valid QR code found in photo. Ensure tag is well-lit.');
+          setScanStatusType('error');
+          playTestBeep(false);
+        }
+      }
+      URL.revokeObjectURL(url);
+    };
+    img.src = url;
+  };
+
   const handleBarcodeScanned = (scannedCode: string) => {
     if (!targetTag) {
-      // Any code dismisses if no tag bound
       handleSuccess();
       return;
     }
@@ -142,12 +176,12 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
     if (isMatch) {
       handleSuccess();
     } else {
-      setAttemptCount((prev) => prev + 1);
-      setScanStatus(`Wrong code "${scannedCode.substring(0, 15)}..."! Required: ${targetTag.name}`);
+      setScanStatus(
+        `Code mismatch! Required physical tag: ${targetTag.name} (${targetTag.location})`
+      );
       setScanStatusType('error');
       playTestBeep(false);
 
-      // Reset scanner after 2.5s
       setTimeout(() => {
         setScanStatus(null);
         startScanningLoop();
@@ -158,7 +192,7 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
   const handleSuccess = () => {
     stopAlarmSound();
     playTestBeep(true);
-    setScanStatus('Verification Verified! Good morning!');
+    setScanStatus('Physical Tag Verified! Alarm Dismissed.');
     setScanStatusType('success');
 
     try {
@@ -178,7 +212,6 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
   // Anti-Cheat Volume Guard
   const handleVolumeChange = (newVol: number) => {
     if (alarm.isStrictLockout && newVol < 0.85) {
-      // Trigger Volume Lockout
       setShowVolumeAlert(true);
       setMasterVolume(1.0);
       setVolume(1.0);
@@ -204,34 +237,48 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
       aria-labelledby="lockout-dialog-title"
       className="fixed inset-0 z-50 bg-[#0B0E11] text-white flex flex-col justify-between overflow-hidden select-none"
     >
-      {/* Blinking Top Guard Bar */}
+      {/* Top Guard Bar */}
       <div className="bg-red-500/20 border-b border-red-500/40 px-4 py-2 flex items-center justify-between text-xs font-mono">
         <div className="flex items-center space-x-2 text-red-400 font-bold">
           <ShieldAlert className="w-4 h-4 animate-pulse text-red-500" />
           <span>SCANWAKE ANTI-CHEAT LOCKOUT ENGAGED</span>
         </div>
         <div className="flex items-center space-x-3 text-gray-400">
-          <span className="text-[#4ADEDE]">VOLUME GUARD: ON</span>
+          <span style={{ color: 'var(--sw-primary)' }}>VOLUME GUARD: ON</span>
           <span className="hidden sm:inline text-gray-500">|</span>
           <span className="text-red-400">EXIT: LOCKED</span>
         </div>
       </div>
 
       {/* Main Lockout Header */}
-      <div className="px-4 py-4 text-center max-w-xl mx-auto w-full">
-        <div className="inline-flex items-center space-x-2 px-3 py-1 rounded-full bg-[#1C232B] border border-[#4ADEDE]/40 text-[#4ADEDE] text-xs font-semibold uppercase tracking-wider mb-2">
+      <div className="px-4 py-3 text-center max-w-xl mx-auto w-full">
+        <div
+          style={{
+            backgroundColor: 'var(--sw-surface)',
+            color: 'var(--sw-primary)',
+            borderColor: 'color-mix(in srgb, var(--sw-primary) 40%, transparent)',
+          }}
+          className="inline-flex items-center space-x-2 px-3 py-1 rounded-full border text-xs font-semibold uppercase tracking-wider mb-1.5"
+        >
           <Lock className="w-3.5 h-3.5" />
           <span>Must Scan Physical Barcode</span>
         </div>
 
-        <h1 id="lockout-dialog-title" className="text-3xl sm:text-4xl font-black tracking-tight text-white flex items-center justify-center gap-2">
-          <span className="text-[#4ADEDE]">{alarm.label || 'Morning Wake'}</span>
+        <h1
+          id="lockout-dialog-title"
+          style={{ color: 'var(--sw-primary)' }}
+          className="text-2xl sm:text-4xl font-black tracking-tight"
+        >
+          {alarm.label || 'Morning Wake'}
         </h1>
 
-        <div className="mt-2 text-sm text-gray-300">
+        <div className="mt-1.5 text-sm text-gray-300">
           {targetTag ? (
             <div className="flex flex-col items-center">
-              <span className="text-base font-bold text-[#7DE2D1]">
+              <span
+                style={{ color: 'var(--sw-accent)' }}
+                className="text-sm sm:text-base font-bold"
+              >
                 Target: {targetTag.name}
               </span>
               <span className="text-xs text-gray-400">
@@ -239,12 +286,14 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
               </span>
             </div>
           ) : (
-            <span className="text-[#4ADEDE]">Scan any registered household QR code</span>
+            <span style={{ color: 'var(--sw-primary)' }}>
+              Scan any registered household QR code
+            </span>
           )}
         </div>
 
         {chainInfo && (
-          <div className="mt-2 inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded bg-[#64CCC5]/20 text-[#7DE2D1] text-xs font-medium border border-[#64CCC5]/40">
+          <div className="mt-1.5 inline-flex items-center space-x-1.5 px-2.5 py-0.5 rounded bg-[#64CCC5]/20 text-[#7DE2D1] text-xs font-medium border border-[#64CCC5]/40">
             <Zap className="w-3 h-3" />
             <span>
               Chain Step {chainInfo.stepIndex + 1} of {chainInfo.totalSteps} ({chainInfo.chainName})
@@ -255,45 +304,70 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
 
       {/* Camera / Barcode Scanner Viewport */}
       <div className="flex-1 px-4 max-w-md mx-auto w-full flex flex-col items-center justify-center relative">
-        <div className="relative w-full aspect-square max-w-[320px] rounded-2xl overflow-hidden bg-[#1C232B] border-2 border-[#4ADEDE] shadow-[0_0_30px_rgba(74,222,222,0.25)] flex items-center justify-center">
-          {/* Real Camera Preview */}
-          <video
-            ref={videoRef}
-            className="w-full h-full object-cover"
-            playsInline
-            muted
-          />
+        <div
+          style={{ borderColor: 'var(--sw-primary)' }}
+          className="relative w-full aspect-square max-w-[260px] sm:max-w-[300px] rounded-2xl overflow-hidden bg-[#1C232B] border-2 shadow-xl flex items-center justify-center"
+        >
+          <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
           <canvas ref={canvasRef} className="hidden" />
 
-          {/* Fallback if no camera */}
           {cameraError && (
-            <div className="absolute inset-0 p-4 bg-[#1C232B]/90 flex flex-col items-center justify-center text-center">
-              <Camera className="w-12 h-12 text-gray-500 mb-2" />
-              <p className="text-xs text-gray-400 mb-4">{cameraError}</p>
+            <div className="absolute inset-0 p-4 bg-[#1C232B]/95 flex flex-col items-center justify-center text-center">
+              <Camera className="w-10 h-10 text-gray-500 mb-2" />
+              <p className="text-xs text-gray-300 mb-3">{cameraError}</p>
+              <button
+                type="button"
+                onClick={() => photoInputRef.current?.click()}
+                style={{ backgroundColor: 'var(--sw-primary)', color: 'var(--sw-bg)' }}
+                className="py-2 px-3.5 rounded-xl text-xs font-bold flex items-center space-x-1.5"
+              >
+                <Camera className="w-3.5 h-3.5" />
+                <span>Capture QR with Camera</span>
+              </button>
+              <input
+                ref={photoInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handlePhotoCaptureScan}
+                className="hidden"
+              />
             </div>
           )}
 
           {/* Animated Laser Reticle */}
-          <div className="absolute inset-4 pointer-events-none border border-[#4ADEDE]/40 rounded-xl flex flex-col justify-between">
-            {/* Corner Markers */}
+          <div className="absolute inset-4 pointer-events-none border border-white/20 rounded-xl flex flex-col justify-between">
             <div className="flex justify-between">
-              <div className="w-6 h-6 border-t-2 border-l-2 border-[#4ADEDE]" />
-              <div className="w-6 h-6 border-t-2 border-r-2 border-[#4ADEDE]" />
+              <div
+                style={{ borderColor: 'var(--sw-primary)' }}
+                className="w-6 h-6 border-t-2 border-l-2"
+              />
+              <div
+                style={{ borderColor: 'var(--sw-primary)' }}
+                className="w-6 h-6 border-t-2 border-r-2"
+              />
             </div>
-            {/* Laser Line */}
-            <div className="w-full h-0.5 bg-gradient-to-r from-transparent via-[#4ADEDE] to-transparent animate-pulse shadow-[0_0_10px_#4ADEDE]" />
+            <div
+              style={{ backgroundColor: 'var(--sw-primary)' }}
+              className="w-full h-0.5 animate-pulse"
+            />
             <div className="flex justify-between">
-              <div className="w-6 h-6 border-b-2 border-l-2 border-[#4ADEDE]" />
-              <div className="w-6 h-6 border-b-2 border-r-2 border-[#4ADEDE]" />
+              <div
+                style={{ borderColor: 'var(--sw-primary)' }}
+                className="w-6 h-6 border-b-2 border-l-2"
+              />
+              <div
+                style={{ borderColor: 'var(--sw-primary)' }}
+                className="w-6 h-6 border-b-2 border-r-2"
+              />
             </div>
           </div>
 
-          {/* Scanning status banner */}
           {scanStatus && (
             <div
               className={`absolute bottom-3 left-3 right-3 py-2 px-3 rounded-lg text-xs font-semibold text-center backdrop-blur-md ${
                 scanStatusType === 'error'
-                  ? 'bg-red-500/80 text-white'
+                  ? 'bg-red-500/90 text-white'
                   : 'bg-emerald-500/90 text-white'
               }`}
             >
@@ -302,48 +376,71 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
           )}
         </div>
 
-        {/* Quick Simulator Test Scan Button */}
-        {targetTag && (
-          <div className="mt-4 w-full max-w-[320px]">
+        {/* Physical Barcode Code Verification Input */}
+        <div className="mt-3 w-full max-w-[300px]">
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (manualCodeInput.trim()) {
+                handleBarcodeScanned(manualCodeInput.trim());
+              }
+            }}
+            className="flex space-x-2"
+          >
+            <div className="relative flex-1">
+              <KeyRound className="w-3.5 h-3.5 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={manualCodeInput}
+                onChange={(e) => setManualCodeInput(e.target.value)}
+                placeholder={
+                  targetTag ? `Enter code (${targetTag.codeValue})` : 'Enter physical tag code'
+                }
+                className="w-full bg-[#1C232B] border border-gray-700 focus:border-[var(--sw-primary)] rounded-xl py-2 pl-8 pr-2.5 text-xs text-white font-mono outline-none"
+              />
+            </div>
             <button
-              onClick={() => handleBarcodeScanned(targetTag.codeValue)}
-              className="w-full py-2.5 px-4 bg-[#1C232B] hover:bg-[#26303B] active:bg-[#32404f] border border-[#4ADEDE]/50 text-[#4ADEDE] rounded-xl text-xs font-bold transition flex items-center justify-center space-x-2"
+              type="submit"
+              style={{ backgroundColor: 'var(--sw-primary)', color: 'var(--sw-bg)' }}
+              className="py-2 px-3.5 rounded-xl text-xs font-bold flex items-center space-x-1 shrink-0"
             >
-              <QrCode className="w-4 h-4" />
-              <span>Simulate Scan: [{targetTag.name}]</span>
+              <Check className="w-3.5 h-3.5" />
+              <span>Verify</span>
             </button>
-            <p className="text-[11px] text-gray-400 text-center mt-1.5">
-              Testing on desktop? Tap button to simulate physical tag match.
-            </p>
-          </div>
-        )}
+          </form>
+        </div>
       </div>
 
       {/* Volume Guard & Lockout Indicators */}
-      <div className="px-4 py-3 max-w-md mx-auto w-full">
-        {/* Anti-Cheat Volume Guard Warning Toast */}
+      <div className="px-4 py-2.5 max-w-md mx-auto w-full">
         {showVolumeAlert && (
-          <div className="mb-2 p-3 bg-red-500/90 text-white rounded-xl text-xs font-bold flex items-center space-x-2 animate-bounce">
+          <div className="mb-2 p-2.5 bg-red-500/90 text-white rounded-xl text-xs font-bold flex items-center space-x-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>Anti-Cheat Guard: Volume override active! Volume snapped to 100%.</span>
+            <span>Anti-Cheat Guard: Volume override active! Volume locked at 100%.</span>
           </div>
         )}
 
-        {/* Anti-Cheat Exit Attempt Warning Toast */}
         {showExitAlert && (
-          <div className="mb-2 p-3 bg-red-600 text-white rounded-xl text-xs font-bold flex items-center space-x-2 animate-bounce">
+          <div className="mb-2 p-2.5 bg-red-600 text-white rounded-xl text-xs font-bold flex items-center space-x-2">
             <Lock className="w-4 h-4 shrink-0" />
-            <span>LOCKOUT ENGAGED: Back button and app switching are disabled. Scan barcode to unlock!</span>
+            <span>
+              LOCKOUT ENGAGED: Back button and app switching are disabled until barcode is verified!
+            </span>
           </div>
         )}
 
         <div className="bg-[#1C232B] rounded-xl p-3 border border-gray-800">
-          <div className="flex items-center justify-between text-xs text-gray-400 mb-2">
+          <div className="flex items-center justify-between text-xs text-gray-400 mb-1.5">
             <div className="flex items-center space-x-1.5">
-              <Volume2 className="w-4 h-4 text-[#4ADEDE]" />
+              <Volume2 className="w-4 h-4" style={{ color: 'var(--sw-primary)' }} />
               <span>Alarm Volume (Guard Protected)</span>
             </div>
-            <span className="font-mono text-[#4ADEDE] font-bold">{Math.round(volume * 100)}%</span>
+            <span
+              style={{ color: 'var(--sw-primary)' }}
+              className="font-mono font-bold"
+            >
+              {Math.round(volume * 100)}%
+            </span>
           </div>
           <input
             type="range"
@@ -352,16 +449,14 @@ export const LockoutRingingModal: React.FC<LockoutRingingModalProps> = ({
             step="0.05"
             value={volume}
             onChange={(e) => handleVolumeChange(parseFloat(e.target.value))}
-            className="w-full accent-[#4ADEDE] h-2 bg-gray-700 rounded-lg cursor-pointer"
+            style={{ accentColor: 'var(--sw-primary)' }}
+            className="w-full h-2 bg-gray-700 rounded-lg cursor-pointer"
           />
-          <p className="text-[10px] text-gray-400 mt-1">
-            Attempting to lower below 85% triggers strict anti-cheat volume reset.
-          </p>
         </div>
       </div>
 
-      {/* Simulated Android Hardware / Navigation Bar */}
-      <div className="bg-[#07090b] border-t border-gray-800/80 px-8 py-3 flex items-center justify-around">
+      {/* Hardware Navigation Guard Bar */}
+      <div className="bg-[#07090b] border-t border-gray-800/80 px-8 py-2.5 flex items-center justify-around">
         <button
           onClick={handleAttemptExit}
           className="p-2 text-gray-400 hover:text-red-400 active:scale-95 transition"

@@ -23,7 +23,7 @@ export const SystemGuardsModal: React.FC<SystemGuardsModalProps> = ({ onClose })
   const guards = [
     {
       title: 'SYSTEM_ALERT_WINDOW (Overlay Guard)',
-      status: 'Active (Simulated)',
+      status: 'Enforced',
       statusColor: 'text-[#4ADEDE]',
       icon: <Layers className="w-5 h-5 text-[#4ADEDE]" />,
       desc: 'Draws full-screen anti-cheat lockout window over lockscreen and prevents bypassing via Home button.',

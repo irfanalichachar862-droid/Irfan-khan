@@ -1,6 +1,6 @@
 /**
- * Web Audio API synthesizer for realistic Android alarm tones
- * Supports continuous looping, volume manipulation, and anti-cheat volume guard
+ * Web Audio API synthesizer & Custom Audio File player for ScanWake
+ * Supports continuous looping, custom uploaded audio files, custom synth frequencies, and volume guard
  */
 
 let audioCtx: AudioContext | null = null;
@@ -9,7 +9,7 @@ let currentOsc2: OscillatorNode | null = null;
 let currentGainNode: GainNode | null = null;
 let currentLfo: OscillatorNode | null = null;
 let currentInterval: any = null;
-let isAudioPlaying = false;
+let currentAudioElement: HTMLAudioElement | null = null;
 
 function getAudioContext(): AudioContext {
   if (!audioCtx) {
@@ -22,19 +22,26 @@ function getAudioContext(): AudioContext {
   return audioCtx;
 }
 
-export type AlarmToneId = 'loud_siren' | 'high_tech_pulse' | 'military_bugle' | 'cyber_klaxon';
+export type AlarmToneId =
+  | 'loud_siren'
+  | 'high_tech_pulse'
+  | 'military_bugle'
+  | 'cyber_klaxon'
+  | 'radar_alert'
+  | 'custom_synth'
+  | 'custom_audio';
 
 export interface ToneInfo {
   id: AlarmToneId;
   name: string;
   description: string;
-  intensity: 'High' | 'Extreme' | 'Piercing';
+  intensity: 'High' | 'Extreme' | 'Custom';
 }
 
 export const AVAILABLE_TONES: ToneInfo[] = [
   {
     id: 'loud_siren',
-    name: 'Emergency Siren (Default)',
+    name: 'Emergency Siren',
     description: 'Alternating dual-pitch sweeping siren designed to break deep sleep.',
     intensity: 'Extreme',
   },
@@ -56,10 +63,63 @@ export const AVAILABLE_TONES: ToneInfo[] = [
     description: 'Upbeat brass-style arpeggio pattern signaling morning rise.',
     intensity: 'High',
   },
+  {
+    id: 'radar_alert',
+    name: 'Submarine Radar',
+    description: 'Deep sonar lock-on beeps with escalating harmonic overtones.',
+    intensity: 'High',
+  },
+  {
+    id: 'custom_synth',
+    name: 'Custom Frequency Synth',
+    description: 'Tune your own custom Hz frequency wave for personalized wake-up.',
+    intensity: 'Custom',
+  },
+  {
+    id: 'custom_audio',
+    name: 'Custom Audio File',
+    description: 'Upload your own MP3, WAV, or OGG ringtone from your device.',
+    intensity: 'Custom',
+  },
 ];
 
-export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume: number = 1.0) {
+export interface PlayToneOptions {
+  customDataUrl?: string;
+  customFreq?: number;
+}
+
+export function playAlarmSound(
+  toneId: AlarmToneId = 'loud_siren',
+  initialVolume: number = 1.0,
+  options?: PlayToneOptions
+) {
   stopAlarmSound();
+
+  // Handle custom uploaded audio file if provided
+  if (toneId === 'custom_audio' && options?.customDataUrl) {
+    try {
+      const audio = new Audio(options.customDataUrl);
+      audio.loop = true;
+      audio.volume = Math.max(0, Math.min(1, initialVolume));
+      currentAudioElement = audio;
+      audio.play().catch((err) => {
+        console.warn('Custom audio play fallback to siren:', err);
+        playSynthesizedTone('loud_siren', initialVolume);
+      });
+      return;
+    } catch (e) {
+      console.warn('Error playing custom audio file, falling back to siren', e);
+    }
+  }
+
+  playSynthesizedTone(toneId, initialVolume, options?.customFreq);
+}
+
+function playSynthesizedTone(
+  toneId: AlarmToneId,
+  initialVolume: number = 1.0,
+  customFreq: number = 640
+) {
   try {
     const ctx = getAudioContext();
     const now = ctx.currentTime;
@@ -68,8 +128,7 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
     masterGain.connect(ctx.destination);
     currentGainNode = masterGain;
 
-    if (toneId === 'loud_siren') {
-      // Sweeping frequency siren
+    if (toneId === 'loud_siren' || toneId === 'custom_audio') {
       const osc = ctx.createOscillator();
       const lfo = ctx.createOscillator();
       const lfoGain = ctx.createGain();
@@ -77,8 +136,8 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
       osc.type = 'sawtooth';
       osc.frequency.setValueAtTime(700, now);
 
-      lfo.frequency.setValueAtTime(2.5, now); // 2.5 cycles per second
-      lfoGain.gain.setValueAtTime(250, now); // swing +/- 250Hz
+      lfo.frequency.setValueAtTime(2.5, now);
+      lfoGain.gain.setValueAtTime(250, now);
 
       lfo.connect(lfoGain);
       lfoGain.connect(osc.frequency);
@@ -90,7 +149,6 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
       currentOsc1 = osc;
       currentLfo = lfo;
     } else if (toneId === 'high_tech_pulse') {
-      // Rapid staccato dual tone
       let step = 0;
       currentInterval = setInterval(() => {
         try {
@@ -110,7 +168,6 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
         } catch (_) {}
       }, 150);
     } else if (toneId === 'cyber_klaxon') {
-      // Aggressive square wave klaxon
       let isHigh = false;
       currentInterval = setInterval(() => {
         try {
@@ -123,7 +180,7 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
           osc2.type = 'sawtooth';
           const freq = isHigh ? 520 : 380;
           osc1.frequency.setValueAtTime(freq, t);
-          osc2.frequency.setValueAtTime(freq * 1.02, t); // slight detune
+          osc2.frequency.setValueAtTime(freq * 1.02, t);
 
           burstGain.gain.setValueAtTime(0.7, t);
           burstGain.gain.linearRampToValueAtTime(0.01, t + 0.35);
@@ -139,8 +196,46 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
           isHigh = !isHigh;
         } catch (_) {}
       }, 420);
+    } else if (toneId === 'radar_alert') {
+      let count = 0;
+      currentInterval = setInterval(() => {
+        try {
+          const t = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const pingGain = ctx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(count % 4 === 3 ? 1320 : 987.77, t);
+          pingGain.gain.setValueAtTime(0.75, t);
+          pingGain.gain.exponentialRampToValueAtTime(0.005, t + 0.2);
+
+          osc.connect(pingGain);
+          pingGain.connect(masterGain);
+          osc.start(t);
+          osc.stop(t + 0.22);
+          count++;
+        } catch (_) {}
+      }, 260);
+    } else if (toneId === 'custom_synth') {
+      const baseFreq = Math.max(150, Math.min(2400, customFreq || 640));
+      let toggle = false;
+      currentInterval = setInterval(() => {
+        try {
+          const t = ctx.currentTime;
+          const osc = ctx.createOscillator();
+          const noteGain = ctx.createGain();
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(toggle ? baseFreq * 1.25 : baseFreq, t);
+          noteGain.gain.setValueAtTime(0.7, t);
+          noteGain.gain.exponentialRampToValueAtTime(0.01, t + 0.22);
+
+          osc.connect(noteGain);
+          noteGain.connect(masterGain);
+          osc.start(t);
+          osc.stop(t + 0.25);
+          toggle = !toggle;
+        } catch (_) {}
+      }, 280);
     } else {
-      // Reveille bugle arpeggio (G3, C4, E4, G4)
       const notes = [196, 261.6, 329.6, 392];
       let noteIndex = 0;
       currentInterval = setInterval(() => {
@@ -161,14 +256,19 @@ export function playAlarmSound(toneId: AlarmToneId = 'loud_siren', initialVolume
         } catch (_) {}
       }, 250);
     }
-
-    isAudioPlaying = true;
   } catch (err) {
     console.error('AudioContext playback error', err);
   }
 }
 
 export function stopAlarmSound() {
+  if (currentAudioElement) {
+    try {
+      currentAudioElement.pause();
+      currentAudioElement.currentTime = 0;
+    } catch (_) {}
+    currentAudioElement = null;
+  }
   if (currentInterval) {
     clearInterval(currentInterval);
     currentInterval = null;
@@ -200,12 +300,15 @@ export function stopAlarmSound() {
     } catch (_) {}
     currentGainNode = null;
   }
-  isAudioPlaying = false;
 }
 
 export function setMasterVolume(vol: number) {
+  const clamped = Math.max(0, Math.min(1, vol));
+  if (currentAudioElement) {
+    currentAudioElement.volume = clamped;
+  }
   if (currentGainNode && audioCtx) {
-    currentGainNode.gain.setValueAtTime(Math.max(0, Math.min(1, vol)), audioCtx.currentTime);
+    currentGainNode.gain.setValueAtTime(clamped, audioCtx.currentTime);
   }
 }
 

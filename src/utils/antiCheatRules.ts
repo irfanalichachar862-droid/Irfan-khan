@@ -5,13 +5,16 @@
 
 export interface AlarmItem {
   id: string;
-  hour: number; // 0-23
+  hour: number; // 0-23 internal 24h representation
   minute: number; // 0-59
   label: string;
   daysOfWeek: number[]; // 0=Sun, 1=Mon, ..., 6=Sat
   isEnabled: boolean;
   targetTagId: string; // ID of RegisteredTag
   toneId: string;
+  customToneName?: string;
+  customToneDataUrl?: string;
+  customToneFreq?: number; // Custom frequency Hz if synthesized
   snoozeMinutes: number; // 0 = disabled
   isStrictLockout: boolean;
   chainId?: string;
@@ -46,6 +49,47 @@ export interface AlarmChain {
   currentStepIndex: number;
 }
 
+export type TimePeriod = 'AM' | 'PM';
+
+/**
+ * Converts 24-hour (0-23) into 12-hour (1-12) and AM/PM period
+ */
+export function to12Hour(hour24: number): { hour12: number; period: TimePeriod } {
+  const normalized = ((hour24 % 24) + 24) % 24;
+  const period: TimePeriod = normalized >= 12 ? 'PM' : 'AM';
+  const hour12 = normalized % 12 === 0 ? 12 : normalized % 12;
+  return { hour12, period };
+}
+
+/**
+ * Converts 12-hour (1-12) and AM/PM period into 24-hour (0-23)
+ */
+export function to24Hour(hour12: number, period: TimePeriod): number {
+  const clamped = Math.max(1, Math.min(12, Math.floor(hour12)));
+  if (period === 'AM') {
+    return clamped === 12 ? 0 : clamped;
+  } else {
+    return clamped === 12 ? 12 : clamped + 12;
+  }
+}
+
+/**
+ * Formats 24-hour and minute into 12-hour display string with AM/PM
+ */
+export function formatTime12Hour(hour24: number, minute: number): {
+  timeText: string;
+  period: TimePeriod;
+  fullText: string;
+} {
+  const { hour12, period } = to12Hour(hour24);
+  const timeText = `${hour12.toString().padStart(2, '0')}:${minute.toString().padStart(2, '0')}`;
+  return {
+    timeText,
+    period,
+    fullText: `${timeText} ${period}`,
+  };
+}
+
 /**
  * Computes a simple cryptographic-style deterministic hex hash of a barcode/QR string.
  * Mimics SHA-256 for offline tag verification.
@@ -57,7 +101,6 @@ export function computeTagHash(codeValue: string): string {
     hash ^= normalized.charCodeAt(i);
     hash = Math.imul(hash, 0x01000193);
   }
-  // Convert to unsigned 32-bit hex and repeat/pad for pseudo 64-char signature
   const p1 = (hash >>> 0).toString(16).padStart(8, '0');
   let hash2 = 0x55555555;
   for (let i = normalized.length - 1; i >= 0; i--) {
@@ -97,23 +140,19 @@ export function calculateNextTriggerTime(
   target.setHours(hour, minute, 0, 0);
 
   if (!daysOfWeek || daysOfWeek.length === 0) {
-    // One-time alarm
     if (target.getTime() <= nowMs) {
       target.setDate(target.getDate() + 1);
     }
     return target.getTime();
   }
 
-  // Repeating alarm on specific days of week (0=Sun, 1=Mon, ..., 6=Sat)
   const currentDay = now.getDay();
   let daysUntil = -1;
 
-  // Check if it can ring today
   if (daysOfWeek.includes(currentDay) && target.getTime() > nowMs) {
     return target.getTime();
   }
 
-  // Find the closest next day in the future
   for (let offset = 1; offset <= 7; offset++) {
     const candidateDay = (currentDay + offset) % 7;
     if (daysOfWeek.includes(candidateDay)) {
@@ -123,7 +162,6 @@ export function calculateNextTriggerTime(
   }
 
   if (daysUntil === -1) {
-    // Fallback tomorrow if empty
     daysUntil = 1;
   }
 
@@ -156,7 +194,7 @@ export function formatTimeUntilAlarm(triggerMs: number, nowMs: number = Date.now
  * Evaluates volume changes and returns whether to enforce 100% lockout override
  */
 export function evaluateVolumeGuard(
-  requestedVolume: number, // 0.0 to 1.0
+  requestedVolume: number,
   isAlarmRinging: boolean,
   isStrictLockout: boolean
 ): { enforcedVolume: number; isGuardTriggered: boolean; warningMessage?: string } {

@@ -2,9 +2,7 @@ import React, { useRef, useState } from 'react';
 import {
   Camera,
   Check,
-  Copy,
-  ExternalLink,
-  Hash,
+  Download,
   MapPin,
   Plus,
   Printer,
@@ -15,7 +13,12 @@ import {
 } from 'lucide-react';
 import jsQR from 'jsqr';
 import { RegisteredTag, computeTagHash } from '../utils/antiCheatRules';
-import { generateBarcodeSvg, generateQrSvg } from '../utils/qrGenerator';
+import {
+  downloadTagAsPng,
+  downloadTagAsSvg,
+  generateBarcodeSvg,
+  generateQrSvg,
+} from '../utils/qrGenerator';
 
 interface TagManagerModalProps {
   tags: RegisteredTag[];
@@ -33,7 +36,6 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
   const [isRegistering, setIsRegistering] = useState<boolean>(false);
   const [selectedTagToView, setSelectedTagToView] = useState<RegisteredTag | null>(null);
 
-  // New tag form state
   const [name, setName] = useState<string>('');
   const [location, setLocation] = useState<string>('');
   const [codeValue, setCodeValue] = useState<string>('');
@@ -57,7 +59,10 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
         videoRef.current.play();
 
         const scanLoop = () => {
-          if (videoRef.current && videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA) {
+          if (
+            videoRef.current &&
+            videoRef.current.readyState === videoRef.current.HAVE_ENOUGH_DATA
+          ) {
             const canvas = canvasRef.current;
             if (canvas) {
               canvas.width = videoRef.current.videoWidth;
@@ -119,23 +124,49 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
     setCodeValue('');
   };
 
+  const handleAutoGenerateCode = () => {
+    const prefix = name.trim()
+      ? name
+          .trim()
+          .toUpperCase()
+          .replace(/[^A-Z0-9]/g, '')
+          .slice(0, 8)
+      : 'SCANWAKE';
+    const randomSuffix = Math.floor(1000 + Math.random() * 9000);
+    setCodeValue(`${prefix}-${randomSuffix}`);
+  };
+
   return (
     <div
       role="dialog"
       aria-modal="true"
       aria-labelledby="tag-manager-title"
-      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto"
+      className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 overflow-y-auto no-scrollbar"
     >
-      <div className="bg-[#1C232B] border border-[#4ADEDE]/30 rounded-2xl max-w-xl w-full p-6 text-white shadow-2xl relative my-8">
+      <div
+        style={{ backgroundColor: 'var(--sw-surface)', borderColor: 'var(--sw-primary)' }}
+        className="border rounded-2xl max-w-xl w-full p-4 sm:p-6 text-white shadow-2xl relative my-6"
+      >
         {/* Header */}
         <div className="flex items-center justify-between pb-4 border-b border-gray-800">
           <div className="flex items-center space-x-2.5">
-            <div className="p-2 bg-[#4ADEDE]/10 text-[#4ADEDE] rounded-xl border border-[#4ADEDE]/30">
+            <div
+              style={{
+                backgroundColor: 'color-mix(in srgb, var(--sw-primary) 15%, transparent)',
+                color: 'var(--sw-primary)',
+                borderColor: 'color-mix(in srgb, var(--sw-primary) 40%, transparent)',
+              }}
+              className="p-2 rounded-xl border"
+            >
               <QrCode className="w-5 h-5" />
             </div>
             <div>
-              <h2 id="tag-manager-title" className="text-lg font-bold text-white">Physical Tag Registry</h2>
-              <p className="text-xs text-gray-400">Everyday barcodes placed around the house to force wakefulness</p>
+              <h2 id="tag-manager-title" className="text-base sm:text-lg font-bold text-white">
+                Physical Tag Registry
+              </h2>
+              <p className="text-xs text-gray-400">
+                Register or download printable QR codes for your rooms
+              </p>
             </div>
           </div>
           <button
@@ -143,6 +174,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
               stopScanner();
               onClose();
             }}
+            aria-label="Close Tag Registry"
             className="p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800 transition"
           >
             <X className="w-5 h-5" />
@@ -150,14 +182,13 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
         </div>
 
         {/* Action Bar */}
-        <div className="py-4 flex items-center justify-between">
-          <span className="text-xs text-gray-400">
-            {tags.length} registered barcode / QR tags
-          </span>
+        <div className="py-3.5 flex items-center justify-between">
+          <span className="text-xs text-gray-400">{tags.length} registered tags</span>
           {!isRegistering && (
             <button
               onClick={() => setIsRegistering(true)}
-              className="py-1.5 px-3 rounded-xl bg-[#4ADEDE] hover:bg-[#64CCC5] text-[#0B0E11] text-xs font-bold transition flex items-center space-x-1.5 shadow-[0_0_12px_rgba(74,222,222,0.3)]"
+              style={{ backgroundColor: 'var(--sw-primary)', color: 'var(--sw-bg)' }}
+              className="py-1.5 px-3 rounded-xl text-xs font-bold transition flex items-center space-x-1.5 hover:opacity-90"
             >
               <Plus className="w-4 h-4" />
               <span>Register New Tag</span>
@@ -167,9 +198,15 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
 
         {/* Register Tag Form */}
         {isRegistering && (
-          <div className="mb-6 p-4 rounded-xl bg-[#0B0E11] border border-[#4ADEDE]/40">
+          <div
+            style={{ backgroundColor: 'var(--sw-bg)', borderColor: 'var(--sw-primary)' }}
+            className="mb-5 p-4 rounded-xl border"
+          >
             <div className="flex items-center justify-between mb-3">
-              <h4 className="text-sm font-bold text-[#4ADEDE] flex items-center gap-1.5">
+              <h4
+                style={{ color: 'var(--sw-primary)' }}
+                className="text-sm font-bold flex items-center gap-1.5"
+              >
                 <Sparkles className="w-4 h-4" />
                 <span>Register Everyday Item</span>
               </h4>
@@ -194,7 +231,8 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                   placeholder="e.g. Toothpaste Tube, Coffee Can, Balcony Planter"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-[#1C232B] border border-gray-700 focus:border-[#4ADEDE] rounded-lg py-2 px-3 text-xs text-white outline-none"
+                  style={{ backgroundColor: 'var(--sw-surface)' }}
+                  className="w-full border border-gray-700 focus:border-[var(--sw-primary)] rounded-lg py-2 px-3 text-xs text-white outline-none"
                 />
               </div>
 
@@ -207,7 +245,8 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                   placeholder="e.g. Master Bathroom, Kitchen Pantry, 2nd Floor Study"
                   value={location}
                   onChange={(e) => setLocation(e.target.value)}
-                  className="w-full bg-[#1C232B] border border-gray-700 focus:border-[#4ADEDE] rounded-lg py-2 px-3 text-xs text-white outline-none"
+                  style={{ backgroundColor: 'var(--sw-surface)' }}
+                  className="w-full border border-gray-700 focus:border-[var(--sw-primary)] rounded-lg py-2 px-3 text-xs text-white outline-none"
                 />
               </div>
 
@@ -216,21 +255,37 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                   <label className="text-[11px] font-semibold text-gray-300 uppercase">
                     Barcode / QR Value
                   </label>
-                  {!isCameraScanning && (
+                  <div className="flex items-center space-x-3">
                     <button
                       type="button"
-                      onClick={startScanner}
-                      className="text-[11px] text-[#4ADEDE] hover:underline flex items-center space-x-1"
+                      onClick={handleAutoGenerateCode}
+                      style={{ color: 'var(--sw-accent)' }}
+                      className="text-[11px] hover:underline"
                     >
-                      <Camera className="w-3 h-3" />
-                      <span>Scan with Camera</span>
+                      Auto-Generate
                     </button>
-                  )}
+                    {!isCameraScanning && (
+                      <button
+                        type="button"
+                        onClick={startScanner}
+                        style={{ color: 'var(--sw-primary)' }}
+                        className="text-[11px] hover:underline flex items-center space-x-1"
+                      >
+                        <Camera className="w-3 h-3" />
+                        <span>Scan Camera</span>
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {isCameraScanning ? (
-                  <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-2 border border-[#4ADEDE]">
-                    <video ref={videoRef} className="w-full h-full object-cover" playsInline muted />
+                  <div className="relative aspect-video rounded-lg overflow-hidden bg-black mb-2 border border-[var(--sw-primary)]">
+                    <video
+                      ref={videoRef}
+                      className="w-full h-full object-cover"
+                      playsInline
+                      muted
+                    />
                     <canvas ref={canvasRef} className="hidden" />
                     <button
                       onClick={stopScanner}
@@ -238,25 +293,22 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                     >
                       Stop Camera
                     </button>
-                    <div className="absolute inset-4 border border-[#4ADEDE]/40 rounded pointer-events-none flex items-center justify-center">
-                      <span className="text-[10px] text-white bg-black/60 px-2 py-0.5 rounded">
-                        Aim at Barcode / QR Code
-                      </span>
-                    </div>
                   </div>
                 ) : (
                   <div className="flex space-x-2">
                     <input
                       type="text"
-                      placeholder="e.g. 7622210449283 or BATH_TOOTHPASTE_01"
+                      placeholder="e.g. BATH_TOOTHPASTE_01"
                       value={codeValue}
                       onChange={(e) => setCodeValue(e.target.value)}
-                      className="flex-1 bg-[#1C232B] border border-gray-700 focus:border-[#4ADEDE] rounded-lg py-2 px-3 text-xs text-white font-mono outline-none"
+                      style={{ backgroundColor: 'var(--sw-surface)' }}
+                      className="flex-1 border border-gray-700 focus:border-[var(--sw-primary)] rounded-lg py-2 px-3 text-xs text-white font-mono outline-none"
                     />
                     <select
                       value={codeFormat}
                       onChange={(e) => setCodeFormat(e.target.value as any)}
-                      className="bg-[#1C232B] border border-gray-700 rounded-lg px-2 text-xs text-gray-300"
+                      style={{ backgroundColor: 'var(--sw-surface)' }}
+                      className="border border-gray-700 rounded-lg px-2 text-xs text-gray-300"
                     >
                       <option value="QR_CODE">QR Code</option>
                       <option value="EAN_13">EAN-13</option>
@@ -271,51 +323,76 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                 type="button"
                 onClick={handleSaveNewTag}
                 disabled={!name.trim() || !codeValue.trim()}
-                className="w-full py-2 bg-[#64CCC5] hover:bg-[#7DE2D1] disabled:opacity-40 text-[#0B0E11] rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 mt-2"
+                style={{ backgroundColor: 'var(--sw-secondary)', color: 'var(--sw-bg)' }}
+                className="w-full py-2 disabled:opacity-40 rounded-lg text-xs font-bold transition flex items-center justify-center space-x-1 mt-2"
               >
                 <Check className="w-3.5 h-3.5" />
-                <span>Save to Room Database</span>
+                <span>Save Physical Tag</span>
               </button>
             </div>
           </div>
         )}
 
         {/* Tags List */}
-        <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+        <div className="space-y-2.5 max-h-[340px] overflow-y-auto no-scrollbar">
           {tags.map((tag) => (
             <div
               key={tag.id}
-              className="p-3.5 rounded-xl bg-[#0B0E11] border border-gray-800 hover:border-gray-700 transition flex items-center justify-between"
+              style={{ backgroundColor: 'var(--sw-bg)' }}
+              className="p-3 rounded-xl border border-gray-800 hover:border-gray-700 transition flex items-center justify-between gap-2"
             >
               <div className="flex items-start space-x-3 truncate">
-                <div className="p-2.5 rounded-lg bg-[#1C232B] text-[#4ADEDE] border border-gray-800 shrink-0">
+                <div
+                  style={{
+                    backgroundColor: 'var(--sw-surface)',
+                    color: 'var(--sw-primary)',
+                  }}
+                  className="p-2 rounded-lg border border-gray-800 shrink-0"
+                >
                   <QrCode className="w-5 h-5" />
                 </div>
                 <div className="truncate">
-                  <div className="font-bold text-sm text-white truncate">{tag.name}</div>
-                  <div className="text-xs text-gray-400 flex items-center space-x-1.5 mt-0.5">
-                    <MapPin className="w-3 h-3 text-[#7DE2D1]" />
-                    <span>{tag.location}</span>
-                    <span className="text-gray-600">•</span>
-                    <span className="font-mono text-[10px] text-gray-500">{tag.codeFormat}</span>
+                  <div className="font-bold text-xs sm:text-sm text-white truncate">
+                    {tag.name}
                   </div>
-                  <div className="text-[10px] font-mono text-[#4ADEDE]/80 truncate mt-0.5">
-                    Hash: {tag.codeHash}
+                  <div className="text-[11px] text-gray-400 flex items-center space-x-1 mt-0.5 truncate">
+                    <MapPin
+                      className="w-3 h-3 shrink-0"
+                      style={{ color: 'var(--sw-accent)' }}
+                    />
+                    <span className="truncate">{tag.location}</span>
                   </div>
                 </div>
               </div>
 
-              <div className="flex items-center space-x-2 shrink-0">
+              <div className="flex items-center space-x-1.5 shrink-0">
+                <button
+                  onClick={() => downloadTagAsPng(tag)}
+                  style={{
+                    backgroundColor: 'var(--sw-surface)',
+                    color: 'var(--sw-primary)',
+                  }}
+                  className="py-1.5 px-2.5 border border-gray-700 hover:border-[var(--sw-primary)] rounded-lg text-xs font-bold transition flex items-center space-x-1"
+                  title="Download Printable PNG"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">PNG</span>
+                </button>
                 <button
                   onClick={() => setSelectedTagToView(tag)}
-                  className="py-1.5 px-2.5 bg-[#1C232B] hover:bg-[#26303B] text-[#7DE2D1] border border-[#7DE2D1]/30 rounded-lg text-xs font-medium transition flex items-center space-x-1"
-                  title="View / Print Scannable Code"
+                  style={{
+                    backgroundColor: 'var(--sw-surface)',
+                    color: 'var(--sw-accent)',
+                  }}
+                  className="py-1.5 px-2.5 border border-gray-700 rounded-lg text-xs font-medium transition flex items-center space-x-1"
+                  title="Preview & Download Code"
                 >
                   <Printer className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">View Code</span>
+                  <span className="hidden sm:inline">Preview</span>
                 </button>
                 <button
                   onClick={() => onDeleteTag(tag.id)}
+                  aria-label={`Delete ${tag.name}`}
                   className="p-1.5 text-gray-500 hover:text-red-400 transition"
                   title="Delete Tag"
                 >
@@ -326,7 +403,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
           ))}
         </div>
 
-        {/* View Scannable Code Modal */}
+        {/* View Scannable Code Modal with Download PNG & SVG */}
         {selectedTagToView && (
           <div
             role="dialog"
@@ -334,15 +411,28 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
             aria-labelledby="tag-preview-title"
             className="fixed inset-0 z-60 bg-black/90 flex items-center justify-center p-4"
           >
-            <div className="bg-[#1C232B] border border-[#4ADEDE] rounded-2xl max-w-sm w-full p-6 text-center text-white relative">
+            <div
+              style={{
+                backgroundColor: 'var(--sw-surface)',
+                borderColor: 'var(--sw-primary)',
+              }}
+              className="border rounded-2xl max-w-sm w-full p-5 text-center text-white relative"
+            >
               <button
                 onClick={() => setSelectedTagToView(null)}
-                className="absolute top-4 right-4 p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800"
+                aria-label="Close Preview"
+                className="absolute top-3.5 right-3.5 p-1.5 text-gray-400 hover:text-white rounded-lg hover:bg-gray-800"
               >
                 <X className="w-5 h-5" />
               </button>
 
-              <h3 id="tag-preview-title" className="text-lg font-bold text-[#4ADEDE]">{selectedTagToView.name}</h3>
+              <h3
+                id="tag-preview-title"
+                style={{ color: 'var(--sw-primary)' }}
+                className="text-lg font-bold"
+              >
+                {selectedTagToView.name}
+              </h3>
               <p className="text-xs text-gray-300 mb-4">{selectedTagToView.location}</p>
 
               {/* Scannable SVG Render */}
@@ -350,7 +440,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                 {selectedTagToView.codeFormat === 'QR_CODE' ? (
                   <div
                     dangerouslySetInnerHTML={{
-                      __html: generateQrSvg(selectedTagToView.codeValue, 200),
+                      __html: generateQrSvg(selectedTagToView.codeValue, 190),
                     }}
                   />
                 ) : (
@@ -359,7 +449,7 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                       __html: generateBarcodeSvg(
                         selectedTagToView.codeValue,
                         selectedTagToView.codeFormat,
-                        220,
+                        210,
                         90
                       ),
                     }}
@@ -367,17 +457,39 @@ export const TagManagerModal: React.FC<TagManagerModalProps> = ({
                 )}
               </div>
 
-              <div className="text-xs font-mono text-gray-400 bg-[#0B0E11] p-2 rounded-lg break-all mb-4">
-                Value: {selectedTagToView.codeValue}
+              <div
+                style={{ backgroundColor: 'var(--sw-bg)' }}
+                className="text-xs font-mono text-gray-300 p-2 rounded-lg break-all mb-4"
+              >
+                {selectedTagToView.codeValue}
               </div>
 
-              <p className="text-[11px] text-gray-400 leading-normal mb-2">
-                Point your mobile or webcam at this screen to test scanning, or print and tape it to the item.
-              </p>
+              {/* Download Options */}
+              <div className="grid grid-cols-2 gap-2 mb-3">
+                <button
+                  onClick={() => downloadTagAsPng(selectedTagToView)}
+                  style={{
+                    backgroundColor: 'var(--sw-primary)',
+                    color: 'var(--sw-bg)',
+                  }}
+                  className="py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 hover:opacity-90"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download PNG</span>
+                </button>
+                <button
+                  onClick={() => downloadTagAsSvg(selectedTagToView)}
+                  style={{ backgroundColor: 'var(--sw-bg)' }}
+                  className="py-2 px-3 rounded-xl border border-gray-700 hover:border-gray-500 text-xs font-bold text-white flex items-center justify-center space-x-1.5"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>Download SVG</span>
+                </button>
+              </div>
 
               <button
                 onClick={() => setSelectedTagToView(null)}
-                className="w-full py-2 bg-[#4ADEDE] text-[#0B0E11] rounded-xl text-xs font-bold"
+                className="w-full py-2 text-xs text-gray-400 hover:text-white"
               >
                 Close Preview
               </button>
